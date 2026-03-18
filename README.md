@@ -8,7 +8,7 @@ The Lab2's file is in `./lab2/src`
 The Lab3's file is in `./lab3/src`
 
 ```bash
-$ cd lab\*
+$ cd lab1,2,3
 $ rm -rf build
 $ mkdir build
 $ cd build
@@ -74,3 +74,5 @@ cd ..
 ```
 
 If any issue happens while compiling `accipit`, you can try my compiled version, architecture: `Mach-O 64-bit executable arm64`, path: `./lab3/accipit`. The test command should be modified to `python3 test.py ../lab3/build/compiler lab3 --executor_path ../lab3/accipit`.
+
+投降喵。之前没有把 cargo.lock 加入 git 管理的文件中，现在编译出的 accipit 无法复现最初的实验结果。
