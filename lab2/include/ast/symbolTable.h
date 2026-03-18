@@ -34,6 +34,17 @@ struct FuncTypeNode {
     // };
 };
 
+// ===================================================================================
+// 【命令式符号表】
+// 命令式风格意味着我们只维护一份当前处于激活状态的全体环境，并通过显式的 push / pop 去修改其内部状态。
+// 当编译器走到哪一层大括号 {}, 它就处于那个环境。
+// `IDSymbolTable` 就是一个模拟环境嵌套的栈结构（外层作用域在栈底，内层在栈顶）。
+// 每进入一个更深的作用域时，命令式系统就会向栈中 push 一个新的 Map 来表示这个新作用域中的变量定义；
+// 遇到新的变量定义时，总是向栈顶的 Map 中添加，并在此时检查重复定义；
+// 查找变量时，从栈顶(最内层作用域)往栈底(全局作用域)查找，这完美模拟了局部变量掩盖全局变量的特性。
+// 离开 `{}` 时，只需要把栈顶对应的 Map 从栈中 pop 出去，就自动清理了这层产生的所有临时变量。
+// ===================================================================================
+
 int isInLoop = false;
 FuncTypeNode* nowFunc = nullptr;
 std::vector<std::map<std::string, IdentTypeNode>> IDSymbolTable {};
@@ -44,7 +55,10 @@ DeType check_type(TreeExpr* expr);
 FuncTypeNode* checkFuncDefine(TreeIdent* ident);
 IdentTypeNode* checkIdDefine(TreeIdent* ident);
 
-
+/**
+ * 检查赋值语句（如 a = b + 1;）语义是否合法
+ * 等号左侧变量的类型 必须等于 右侧表达式推导出的类型，且要求两者都为标准的 INT
+*/
 bool check (TreeLvalEqStmt* leq) {
     DeType left = check_type(leq->lval);
     DeType right = check_type(leq->exp);
@@ -57,6 +71,13 @@ bool check (TreeLvalEqStmt* leq) {
     return false;
 }
 
+/**
+ * 检查 return 语句的语义是否合法
+ * 判断的核心：
+ * 1. 结合全局变量 `nowFunc` (由外层函数遍历控制) 确保我们确实在某个函数体内。
+ * 2. 如果所在函数的类型是 VOID，绝对不允许其 return 中附带有任何表达式。
+ * 3. 如果所在函数的类型是 INT，绝对不允许空 return，而且检查返回的表达式类型也必须推导为 INT。
+*/
 bool check (TreeReturnStmt* ret) {
     // check the return type is weather equal to now function
     if (nowFunc == nullptr) {
@@ -83,6 +104,11 @@ bool check (TreeReturnStmt* ret) {
 
 }
 
+/**
+ * 检查 if 语句的条件表达式语义
+ * 判断的核心：if (条件) 中的 “条件” 不能缺失，并且在 SysY / C 语言规范中，
+ * 这个分支控制条件的推导结果通常应当为 INT 类型（0 为 false，非 0 为 true）。
+*/
 bool check (TreeIfStmt* iff) {
     // check if condition
     if (iff->exp == nullptr) {
@@ -94,6 +120,9 @@ bool check (TreeIfStmt* iff) {
     return true;
 }
 
+/**
+ * 检查 while 语句的条件表达式语义
+*/
 bool check (TreeWhileStmt* wh) {
     if (check_type(wh->exp) != DeType::INT) {
         throw("Invalid for the condition express for while\n");
@@ -102,28 +131,33 @@ bool check (TreeWhileStmt* wh) {
 }
 
 /**
+ * 递归检查 / 推导表达式具体类型的核心函数
+ * 对所有的子表达式计算类型 (DeType)
+ *
  * @param expr The expression to find the type
  * @return The type of expression
 */
 DeType check_type (TreeExpr* expr) {
-    // Lval
+    // Lval ，例如某个变量 a，或者是数组的元素 a[1]
     if (auto *lval = expr->as<TreeLVal*>()) {
-        // Ident or array
-        // first check the ident is define
+        // 检查 LVal 的标识符是否存在于符号表中
         IdentTypeNode *tmp = checkIdDefine(lval->ident);
         if (tmp == nullptr) {
             throw("Use undefine Ident\n");
         }
         else if ((tmp->dimension == 0) && (lval->hasExpress)) {
+
             throw("The Ident can't be used as array\n");
         }
-        // array
+        
+        // 数组
         if (tmp->type == DeType::ARRAY_INT) {
-            // all child should be INT but not void
-            // check all child and expect 
+            // 数组调用的中括号维数不能多于原定义的维数
             if (lval->exprs->size() > (unsigned int)tmp->dimension) {
                 throw("Array has too many params\n");
             }
+            
+            // 数组访问的 index 参数必须可以推导为 INT
             for (unsigned int i = 0; i < lval->exprs->size(); ++i) {
                 DeType child = check_type(lval->exprs->at(i));
                 if (child == DeType::VOID) {
@@ -133,33 +167,37 @@ DeType check_type (TreeExpr* expr) {
                     throw("The index of array is not INT\n");
                 }
             }
+            
+            // 如果所填的中括号数等于数组原本维数，说明它精确访问到了一个具体的整型值，返回 INT
             if (lval->exprs->size() == (unsigned int)tmp->dimension) {
                 return DeType::INT;
             }
+            // 否则这就是一个未完全降解的数组头指针调用，返回其截断后的数组类型标记
             else {
                 return (DeType)((DeType::ARRAY_INT) + (tmp->dimension - lval->exprs->size()));
             }
         }
-        // INT
+        // 普通 INT 变量
         else if (tmp->type == DeType::INT) {
             return DeType::INT;
         }
     }
-    // int
+    // const number显然是 INT
     else if ([[maybe_unused]]auto *inte = expr->as<TreeIntegerLiteral*>()) {
         return DeType::INT;
     }
-    // Unary
+    // Unary 一元表达式
     else if (auto *una = expr->as<TreeUnaryExpr*>()) {
         // maybe (-a)  or (foo(a,b))
-        // func call
+        // func call -> 复杂的函数调用类型匹配
         if (una->op == OpType::OP_Func) {
-            // check that the func has defined
+            // 首先查函数表，看函数在全局作用域有没有定义过
             FuncTypeNode* functmp = checkFuncDefine(una->id);
             if (functmp == nullptr) {
                 throw("The function used is not defined\n");
             }
-            // first check the RParams is equal to the Params
+            
+            // 比对调用时传入的参数个数类型与函数声明时是否严格一致
             if (una->operand != nullptr) {
                 auto* rParams = una->operand->as<TreeFuncRParams*>();
                 int rnum = rParams->child->size();
@@ -230,13 +268,12 @@ DeType check_type (TreeExpr* expr) {
  * find the ident of id
 */
 IdentTypeNode* checkIdDefine(TreeIdent* ident) {
-    // bool find = false;
-    int n = IDSymbolTable.size();
-    for (int i = n - 1; i >= 0; --i) {
-        auto mp = IDSymbolTable[i];
-        auto it = mp.find(ident->IdentName);
-        if (it != mp.end()) {
-            return &(IDSymbolTable[i][ident->IdentName]);
+    // 逆序遍历符号表栈
+    for (auto it = IDSymbolTable.rbegin(); it != IDSymbolTable.rend(); ++it) {
+        auto& scopeMap = *it; 
+        auto found = scopeMap.find(ident->IdentName);
+        if (found != scopeMap.end()) {
+            return &(found->second);
         }
     }
     return nullptr;
@@ -246,16 +283,18 @@ IdentTypeNode* checkIdDefine(TreeIdent* ident) {
  * 
 */
 FuncTypeNode* checkFuncDefine(TreeIdent* ident) {
-    // bool find = false;
-    // int n = FuncSymbolTable.size();
+    // 根据 SysY 语言规范（也如文档提及），函数只能在全局作用域定义。
+    // 因此这里只需要检查第一层作用域（下标为 0 的全局映射表）。
     
-    for (int i = 0; i >= 0; --i) {
-        auto mp = FuncSymbolTable[i];
-        auto it = mp.find(ident->IdentName);
-        if (it != mp.end()) {
-            return &(FuncSymbolTable[0][ident->IdentName]);
-        }
+    if (FuncSymbolTable.empty()) return nullptr;
+    
+    auto& globalScope = FuncSymbolTable[0];
+    auto found = globalScope.find(ident->IdentName);
+    
+    if (found != globalScope.end()) {
+        return &(found->second);
     }
+    
     return nullptr;
 }
 
@@ -271,14 +310,18 @@ FuncTypeNode* checkFuncDefine(TreeIdent* ident) {
  * TODO
 */
 bool addToIDSymbolTable (TreeVarDecl* node) {
-    int n = IDSymbolTable.size();
-    if (n == 0) {
-        throw("There is no domain to add\n");
+    if (IDSymbolTable.empty()) {
+        throw("There is no domain to add\n"); // 确保至少有一个作用域存在
     }
+    
+    // 始终在当前（栈顶）作用域中添加变量
+    auto& currentScope = IDSymbolTable.back(); 
+
     for (unsigned int i = 0; i < node->varDef->size(); ++i) {
         TreeVarDef* var = node->varDef->at(i);
-        // check if it has been defined
-        if (IDSymbolTable[n-1].find(var->ident->IdentName) != IDSymbolTable[n-1].end()) {
+        
+        // 检查该变量在当前作用域中是否已存在（屏蔽了对外层同名变量的重复定义检查，因为局部变量允许覆盖外层变量）
+        if (currentScope.find(var->ident->IdentName) != currentScope.end()) {
             throw("This var has defined in this domain before\n");
         }
         // add it to table
@@ -300,7 +343,7 @@ bool addToIDSymbolTable (TreeVarDecl* node) {
             idNode.type = DeType::INT;
             idNode.dimension = 0;
         }
-        IDSymbolTable[n-1][var->ident->IdentName] = idNode;
+        currentScope[var->ident->IdentName] = idNode;
     }
     return true;
 };
@@ -311,22 +354,27 @@ bool addToIDSymbolTable (TreeVarDecl* node) {
  * check first and insert then
 */
 FuncTypeNode* addToFuncSymbolTable (TreeFuncDef* node) {
-    int n = IDSymbolTable.size();
-    if (n == 0) {
+    // 根据文档，函数只能定义在全局作用域 (栈大小应为 1，或直接压入 0 号索引)
+    if (FuncSymbolTable.empty()) {
         throw("There is no domain to add\n");
     }
-    else if (n >= 2) {
-        throw("Function can only define in the gloable domain\n");
+    // 假设 IDSymbolTable.size() 大于 1 表示当前在一个花括号块内
+    if (IDSymbolTable.size() >= 2) {
+        throw("Function can only define in the global domain\n");
     }
+
+    auto& globalFuncScope = FuncSymbolTable[0];
+
     // check
-    if (FuncSymbolTable[0].find(node->ident->IdentName) != FuncSymbolTable[0].end()) {
-        throw("There has defined thhis function\n");
+    if (globalFuncScope.find(node->ident->IdentName) != globalFuncScope.end()) {
+        throw("This function has been defined before\n");
     }
+
     // add
     unsigned int type = node->type->type;
     FuncTypeNode* funcnode = new FuncTypeNode;
     funcnode->type = (type) ? DeType::FUNC_INT : DeType::FUNC_VOID;
-    // add params  the params also need to add to the new doamin
+    // add params  the params also need to add to the new domain
     TreeFuncParams* params = node->params;
     if (params != nullptr) {
         for (unsigned int i = 0; i < params->child->size(); ++i) {

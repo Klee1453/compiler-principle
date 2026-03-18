@@ -25,3 +25,47 @@ There is a tool to execute the IR, like `test.acc`, in the dir `target/debug/acc
 ```bash
 $ ./target/debug/accipit ./tests/IR/test.acc
 ```
+
+## Notes
+
+clean all before build or commit:
+
+```bash
+rm -rf lab1/build lab2/build lab3/build
+```
+
+test your compiler:
+
+```bash
+# test.py usage for lab1
+# =========================
+# step 1. build your compiler
+cd lab1
+mkdir -p build && cd build
+cmake ..
+make
+# step 2. test your compiler
+cd ../../tests
+python3 test.py ../lab1/build/compiler lab1 --executor_path test.py
+
+# test.py usage for lab2
+# =========================
+cd lab2
+mkdir -p build && cd build
+cmake ..
+make
+cd ../../tests
+python3 test.py ../lab2/build/compiler lab2 --executor_path test.py
+
+# a rust environment is needed for lab3, and you can use the `accipit` tool to execute the IR code.
+# test.py usage for lab3
+cargo build --manifest-path Cargo.toml
+cd lab3
+mkdir -p build && cd build
+cmake ..
+make
+cd ../../tests
+python3 test.py ../lab3/build/compiler lab3
+```
+
+If any issue happens while compiling `accipit`, you can try my compiled version, architecture: `Mach-O 64-bit executable arm64`, path: `./lab3/accipit`. The test command should be modified to `python3 test.py ../lab3/build/compiler lab3 --executor_path ../lab3/accipit`.

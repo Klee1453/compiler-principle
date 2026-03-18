@@ -15,9 +15,9 @@ int main(int argc, char **argv) {
                 return 1;
             }
             root = nullptr;
-            yyparse();
+            yyparse();              // 解析输入文件，构建 AST
             try{    
-                print_tree(root);       //?root存在内存泄漏
+                print_tree(root);   // 打印 AST 同时检查语义合法性
             }
             catch (const char *s) {
                 fmt::print("\033[31m[ERROR] :\033[0m {}", s);
@@ -28,7 +28,7 @@ int main(int argc, char **argv) {
     else {
         yyparse();
         try{    
-            print_tree(root);       //?root存在内存泄漏
+            print_tree(root); 
         }
         catch (const char *s) {
             fmt::print("\033[31m[ERROR] :\033[0m {}", s);

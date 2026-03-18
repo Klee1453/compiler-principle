@@ -101,11 +101,11 @@ CompUnit_   :   Decl                        { $$ = $1;}
             ; */
 
 // identfy  
-Ident       :   IDENT                       { $$ = yyval.ident;}
+Ident       :   IDENT                       { $$ = $1;}
             ;
 
 // const number
-Number      :   NUM                         { $$ = yyval.integer; }
+Number      :   NUM                         { $$ = $1; }
             ;
 
 // $$ = stmt     Decl             ::= VarDecl;

@@ -56,10 +56,11 @@ void print_tree(Node* node, std::string prefix, bool isfunctiondef) {
         fmt::print("Ident {}\n", id->IdentName);
     }
 
+    // 赋值
     // left value assigment
     if (auto *les = node->as<TreeLvalEqStmt*>()) {
         fmt::print("BinOp Assign\n");
-        check(les);
+        check(les); // 类型检查
         print_tree(les->lval, prefix + "    ");
         print_tree(les->exp, prefix + "    ");
     }
@@ -124,23 +125,28 @@ void print_tree(Node* node, std::string prefix, bool isfunctiondef) {
     }
 
     // block
+    // 当遇到大括号节点
     if (auto *block = node->as<TreeBlock*>()) {
         fmt::print("Block\n");
-        newDomain();
+        newDomain();    // 向栈中压入一个新的作用域
         if (isfunctiondef) {
+            // 处理函数定义时，函数参数也需要被视为局部变量加入到函数体的作用域中
             // copy the fparams' domain to the func's block's domain
             int n = IDSymbolTable.size();
             IDSymbolTable[n-1] = IDSymbolTable[n-2];
         }
+        // 递归打印块内的每个语句
         for (unsigned int i = 0; i < block->child->size(); ++i) {
             print_tree(block->child->at(i), prefix + "    ");
         }
+        // 离开大括号块时，弹出当前作用域
         deleteDomain();
     }
 
+    // 新变量声明
     // declear var
     if (auto *varDecl = node->as<TreeVarDecl*>()) {
-        addToIDSymbolTable(varDecl);
+        addToIDSymbolTable(varDecl);    // 检查类型，加入符号表
         std::string type = varDecl->type->type == 0 ? "VOID" : "INT"; 
         fmt::print("Var Declear {}\n", type);
         for (unsigned int i = 0; i < varDecl->varDef->size(); ++i) {
