@@ -18,6 +18,7 @@ $ ./compilor
 ```
 
 ## lab3
+
 This part we translate the AST to IR code, use the tool of IR, in `./lab3/accsys/`.
 
 There is a tool to execute the IR, like `test.acc`, in the dir `target/debug/accipit`
@@ -34,23 +35,25 @@ clean all before build or commit:
 rm -rf lab1/build lab2/build lab3/build
 ```
 
-test your compiler:
+test compiler with `test.py`:
+
+lab1:
 
 ```bash
-# test.py usage for lab1
-# =========================
-# step 1. build your compiler
+# step 1. build
 cd lab1
 mkdir -p build && cd build
 cmake ..
 make
-# step 2. test your compiler
+# step 2. test
 cd ../../tests
 python3 test.py ../lab1/build/compiler lab1 --executor_path test.py
 cd ..
+```
 
-# test.py usage for lab2
-# =========================
+lab2:
+
+```bash
 cd lab2
 mkdir -p build && cd build
 cmake ..
@@ -58,12 +61,16 @@ make
 cd ../../tests
 python3 test.py ../lab2/build/compiler lab2 --executor_path test.py
 cd ..
+```
 
-# a rust environment is needed for lab3 tester, 
-# and the `accipit` should be compiled before testing.
-# test.py usage for lab3
-# =========================
-cargo build --manifest-path Cargo.toml
+lab3:
+
+Note. a rust environment is needed for lab3 tester, and the `accipit` should be compiled before testing. If any issue occurs while compiling `accipit`, you can try to run our compiled `accipit` in `accipit/` dir.
+
+NNote. the `Cargo.lock` file is especially important for compiling rust code in the future, so please do not remove it from git repository. (commented by 2026.03.18)
+
+```bash
+cargo build --locked
 cd lab3
 mkdir -p build && cd build
 cmake ..
@@ -73,6 +80,8 @@ python3 test.py ../lab3/build/compiler lab3
 cd ..
 ```
 
-If any issue happens while compiling `accipit`, you can try my compiled version, architecture: `Mach-O 64-bit executable arm64`, path: `./lab3/accipit`. The test command should be modified to `python3 test.py ../lab3/build/compiler lab3 --executor_path ../lab3/accipit`.
+If you use the compiled `accipit` in `accipit/` dir, you can set the `executor_path` to `./accipit/accipit-darwin-arm64`:
 
-投降喵。之前没有把 cargo.lock 加入 git 管理的文件中，现在编译出的 accipit 无法复现最初的实验结果。
+```bash
+python3 test.py ../lab3/build/compiler lab3 --executor_path ../accipit/accipit-darwin-arm64
+```
