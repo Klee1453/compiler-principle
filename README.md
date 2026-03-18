@@ -47,6 +47,7 @@ make
 # step 2. test your compiler
 cd ../../tests
 python3 test.py ../lab1/build/compiler lab1 --executor_path test.py
+cd ..
 
 # test.py usage for lab2
 # =========================
@@ -56,9 +57,12 @@ cmake ..
 make
 cd ../../tests
 python3 test.py ../lab2/build/compiler lab2 --executor_path test.py
+cd ..
 
-# a rust environment is needed for lab3, and you can use the `accipit` tool to execute the IR code.
+# a rust environment is needed for lab3 tester, 
+# and the `accipit` should be compiled before testing.
 # test.py usage for lab3
+# =========================
 cargo build --manifest-path Cargo.toml
 cd lab3
 mkdir -p build && cd build
@@ -66,6 +70,7 @@ cmake ..
 make
 cd ../../tests
 python3 test.py ../lab3/build/compiler lab3
+cd ..
 ```
 
 If any issue happens while compiling `accipit`, you can try my compiled version, architecture: `Mach-O 64-bit executable arm64`, path: `./lab3/accipit`. The test command should be modified to `python3 test.py ../lab3/build/compiler lab3 --executor_path ../lab3/accipit`.
