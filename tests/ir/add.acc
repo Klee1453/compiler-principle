@@ -1,0 +1,33 @@
+fn @getint( ) -> i32;
+fn @getch( ) -> i32;
+fn @getarray(#0: i32* ) -> i32;
+fn @putint(#0: i32 ) -> ();
+fn @putch(#0: i32 ) -> ();
+fn @putarray(#0: i32, #1: i32* ) -> ();
+fn @starttime( ) -> ();
+fn @stoptime( ) -> ();
+fn @main( ) -> i32 {
+%GlobalBind:
+  jmp label %FuncEntry
+%FuncEntry:
+  let %ret = alloca i32, 1
+  let %a.0 = alloca i32, 1
+  let %b.0 = alloca i32, 1
+  jmp label %FuncBody
+%AfterRet_1:
+  jmp label %FuncRet
+%FuncBody:
+  let %3 = call @getint
+  let %4 = store %3, %a.0
+  let %5 = call @getint
+  let %6 = store %5, %b.0
+  let %7 = load %a.0
+  let %8 = load %b.0
+  let %9 = add %7, %8
+  let %10 = call @putint, %9
+  let %11 = store 0, %ret
+  jmp label %FuncRet
+%FuncRet:
+  let %13 = load %ret
+  ret %13
+}

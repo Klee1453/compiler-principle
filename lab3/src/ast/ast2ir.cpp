@@ -40,9 +40,15 @@ Module* CompMod = nullptr;
 extern std::vector<std::map<std::string, IdentTypeNode>> IDSymbolTable;
 extern std::vector<std::map<std::string, FuncTypeNode>> FuncSymbolTable;
 
-// translate expression to a value
+// ------------------------------------------------------------------------
+// 【1. 计算求值模块】翻译算术表达式、取值和逻辑（即“求右值”）
+// 目的：高级语言的公式（比如 a + b * c）无法被硬件直接理解。
+// 操作：深度优先地遍历树节点，生成一条条线性的执行指令（像排流水线一样）。
+// 重点：指令的计算结果保存在由 `Value*` 代理的临时“虚拟寄存器”中，而不是物理内存。
+//      遇到算数运算时，分别递归求出左右两子树的 Value*，最后通过 Create 运算指令连接。
+// ------------------------------------------------------------------------
 Value* translate_expr(TreeExpr* expr, BasicBlock* bb) {
-    // OK Lval -> var or array, just do nothing
+    // 处理左值读取(如引用某个变量或数组的值)
     if (auto *lval = expr->as<TreeLVal*>()) {
         // var or array
         // array a[x1][x2][x3]
@@ -58,7 +64,7 @@ Value* translate_expr(TreeExpr* expr, BasicBlock* bb) {
             for (int i = 0; i < IdType->dimension; ++i) {
                 if (IdType->domainSize[i] == 0) {
                     if (i != 0) {
-                        throw("Func's Array Param's index(1,2,3,...) can't be 0 expect index(0)\n");
+                        throw std::runtime_error("Func's Array Param's index(1,2,3,...) can't be 0 expect index(0)\n");
                     }
                     BoundList.push_back(std::nullopt);
                 }
@@ -101,7 +107,7 @@ Value* translate_expr(TreeExpr* expr, BasicBlock* bb) {
             for (int i = 0; i < IdType->dimension; ++i) {
                 if (IdType->domainSize[i] == 0) {
                     if (i != 0) {
-                        throw("Func's Array Param's index(1,2,3,...) can't be 0 expect index(0)\n");
+                        throw std::runtime_error("Func's Array Param's index(1,2,3,...) can't be 0 expect index(0)\n");
                     }
                     BoundList.push_back(std::nullopt);
                 }
@@ -238,8 +244,14 @@ Value* translate_expr(TreeExpr* expr, BasicBlock* bb) {
     return nullptr;
 }
 
-// left value assigment
-// change the table, means that a symbol's value is change to the newest
+// ------------------------------------------------------------------------
+// 【2. 赋值模块】处理等号赋值（如 arr[i] = 10 或 a = b + 1）
+// 目的：将算出的“结果数据”安放到真正“物理内存堆栈”的固定位置去。
+// 操作：
+// 1. 先计算获取左侧目标变量（LVal）的“内存首地址”（从符号表里查到）。
+// 2. 递归右侧表达式（RExp），算出一个带有结果的 Value*。 
+// 3. 构建一条 Store 指令，把右边的数值写入到左边的地址指针中，完成更新。
+// ------------------------------------------------------------------------
 void translate_expr(TreeLvalEqStmt* expr, BasicBlock* bb) {
     
     // Lval: global or jvbu
@@ -261,7 +273,7 @@ void translate_expr(TreeLvalEqStmt* expr, BasicBlock* bb) {
         for (int i = 0; i < IdType->dimension; ++i) {
             if (IdType->domainSize[i] == 0) {
                 if (i != 0) {
-                    throw("Finc's Array Param's error\n");
+                    throw std::runtime_error("Finc's Array Param's error\n");
                 }
                 BoundList.push_back(std::nullopt);
             }
@@ -286,9 +298,15 @@ void translate_expr(TreeLvalEqStmt* expr, BasicBlock* bb) {
     return ;
 };
 
-// var declear 
-// if it is in a function, it should use alloc and store, and store to the IDValueTable
-// if it is a global, it should be store to module and IDValueTable
+// ------------------------------------------------------------------------
+// 【3. 变量声明模块】在内存中为新诞生的变量分配空间并登记
+// 核心机制（Alloca破窗法）：这是编译原理入门里处理复杂重新赋值最常用的捷径。
+//  - 全局变量：直接抛到独立的数据分段中(GlobalVariable)。
+//  - 局部变量：强制在它们所在函数的**第一行指令块(Entry Block)**统一用 Alloca 开辟一块堆栈空间！
+//    这样以后哪怕代码里反复发生 `i = 1; i = 2;` 的覆写，
+//    在 IR 的视角都只是对这块固定的地址做普通的 Store 操作，
+//    完美避开了手动维死板的 SSA Phi节点（分支融合点）分配这件极其烧脑的事情！
+// ------------------------------------------------------------------------
 void translate_expr(TreeVarDecl* decl, BasicBlock* bb) {
     // if size == 1 for gloable var
     if (IDValueTable.size() == 1) {
@@ -332,8 +350,9 @@ void translate_expr(TreeVarDecl* decl, BasicBlock* bb) {
         }
     }
     else {
-        // jvbu var
-        // change name
+        // (局部变量)
+        // 采用 "Alloca法"：统一在当前所处函数的 Entry 块内申请栈空间
+        // 然后在当前 BasicBlock 利用 Store 指令存入初始值
         Function* pp = bb->getParent();
         BasicBlock* fentry = &pp->getEntryBlock();
         Type* ty = nullptr;
@@ -372,6 +391,15 @@ void translate_expr(TreeVarDecl* decl, BasicBlock* bb) {
     }
 }
 
+// ------------------------------------------------------------------------
+// 【4. 函数定义模块】组装出一个函数的编译大框架
+// 原理：单个函数可以被看做是一个孤立的作用域副本。
+// 步骤：
+// 1. 建立函数的签名边界：需要什么参数类型进来，需要吐出什么类型结（构建 FunctionType）。
+// 2. 建立此函数的三大核心交通枢纽块：入口块(fentry)、执行主体块(fbody)、返回收口块(fret)。
+// 3. 将函数的返回值空间、接客的参数统一在首个 BasicBlock 里用 Alloca 提现到栈。
+// 4. 重置新循环（保证作用域独立），继续深入腹地翻译大括号 `{...}` 内的执行指令。
+// ------------------------------------------------------------------------
 Value* translate_expr(TreeFuncDef* fdef, BasicBlock* bb) {
     // function declear
     // static Function *Create(FunctionType *FTy, bool ExternalLinkage = false,
@@ -445,8 +473,12 @@ Value* translate_expr(TreeFuncDef* fdef, BasicBlock* bb) {
 }
 
 BasicBlock* translate_stmt(TreeStmt* stmt, BasicBlock* bb, bool fromFunc) {
-    // if while break return block continue
-    // OK if
+    // ------------------------------------------------------------------------
+    // 将高层级的结构化控制流（If, While等）打平到基本块(BasicBlock)
+    //  并利用Branch指令和Jump指令将它们链接成控制流图(CFG)。
+    // ------------------------------------------------------------------------
+
+    // 处理 If 语句
     if (auto* If = stmt->as<TreeIfStmt*>()) { 
         BasicBlock *isT, *isF, *exit, *entry;
 
@@ -524,7 +556,9 @@ BasicBlock* translate_stmt(TreeStmt* stmt, BasicBlock* bb, bool fromFunc) {
             return exit;
         }
     }
-    // OK while
+    // 处理 while 语句
+    // 翻译策略：创建一个条件判断块(entry)，一个循环体(body)以及一个循环出口(exit)。
+    // 每次执行完 body 都要跳回 entry 进行判断；break跳出到exit，continue跳回到entry
     else if (auto* While = stmt->as<TreeWhileStmt*>()) {
         BasicBlock *entry, *body, *exit;
         std::string bbname;
@@ -545,22 +579,24 @@ BasicBlock* translate_stmt(TreeStmt* stmt, BasicBlock* bb, bool fromFunc) {
         isIRinLoop++;
         loopExit = exit;
         loopEntry = entry;
-        allLoops.push_back({entry, exit});
+        allLoops.push_back({entry, exit});      // 将当前环境推入栈，方便内部 break / continue 跳转定位
         BasicBlock* bodyExit = translate_stmt(While->stmt, body);
-        allLoops.pop_back();
+        allLoops.pop_back();                    // 恢复上下文
         loopEntry = nullptr;
         loopExit = nullptr;
         isIRinLoop--;
 
+        // 无论如何，主体执行块结尾必须连接回 entry 进行新一轮判定
         Value* j2exit = JumpInst::Create(entry, bodyExit);
 
+        // 如果之后还有别的语句，均顺接到新创建的 exit 基本块，所以这里向外返回 exit
         return exit;
     }
     // OK break
     else if (auto* Break = stmt->as<TreeBreakStmt*>()) {
         // break out from the minmun loop, for and while
         if (!isIRinLoop) {
-            throw("Break but not in loop\n");
+            throw std::runtime_error("Break but not in loop\n");
         }
         
         BasicBlock* afterBreak = BasicBlock::Create(bb->getParent(), bb);
@@ -572,7 +608,7 @@ BasicBlock* translate_stmt(TreeStmt* stmt, BasicBlock* bb, bool fromFunc) {
     // OK continue
     else if (auto* Continue = stmt->as<TreeContinueStmt*>()) {
         if (!isIRinLoop) {
-            throw("Continue but not in loop\n");
+            throw std::runtime_error("Continue but not in loop\n");
         }
         
         Value* jmp = JumpInst::Create(allLoops.back().first, bb);
@@ -844,6 +880,7 @@ Module* translate_root (Node* node) {
     gloVarBB->setName("GlobalBind");
     doGlobalVarBinding(globalVarBinding, gloVarBB);
     Value* j2e = JumpInst::Create(mmentry, gloVarBB);
+
     deleteValueDomain();
     deleteDomain();
     return CompMod;
@@ -851,11 +888,19 @@ Module* translate_root (Node* node) {
 
 
 /**
+ * ------------------------------------------------------------------------
+ * 【5. 短路判定生成模块（进阶）】专为 If 极简条件语句中遇见的 && 和 || 设立
+ * 背景：对于表达式 `if (A && B)`，只要发现左子树 A 是假的，连计算 B 的 IR 指令都不该跑。
+ * 做法：与平平无奇的加法把全部算完放一块截然不同；
+ * 这里通过人为给右子树 B 套上一层额外的基本块壁垒（隔离成 Inner、Right等），
+ * 先算出 A，用一个 Branch 查其真假：A 为假时则果断用一把 Jump 刀越界砍飞，飞过 B 所在的区，
+ * 跳进最后的目的地，由此在最底层汇编级实现了漂亮的 短路判定。
+ * ------------------------------------------------------------------------
  * @param: ifStmt: the root if statement
  * @param: expr: now translating expr
  * @param: bb: now is in bb
  * @param: des: need to branch or jump to
- * @param: the return value should store to ptr
+ * @param: ptr: the return value should store to ptr
  * 
  * @return: the bb exit maybe unused
 */ 
@@ -994,7 +1039,7 @@ BasicBlock* shortPathForIf (TreeIfStmt* ifStmt, TreeExpr* expr, BasicBlock* bb, 
                     finalRes = BinaryInst::CreateXor(loadLeft, loadRight, Type::getIntegerTy(), RelFinalBB);
                     break;
                 default:
-                    throw("Error\n");
+                    throw std::runtime_error("Error\n");
                     break;
             }
             Value* store = StoreInst::Create(finalRes, ptr, RelFinalBB);
